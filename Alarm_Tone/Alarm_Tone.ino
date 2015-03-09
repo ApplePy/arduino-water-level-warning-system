@@ -29,13 +29,14 @@ int speakerOut = 9;
 int sensorPin = 1;
 byte names[] = {'c', 'd', 'e', 'f', 'g', 'a', 'b', 'C'};
 int tones[] = {1915, 1700, 1519, 1432, 1275, 1136, 1014, 956};
-byte melody[] = "3b3d"; //"3b3d3b3d3b3d3b3d";
+byte melody[] = "3b3d3b3d"; //"3b3d3b3d3b3d3b3d";
 // count length: 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0
 //                                10                  20                  30
 int count = 0; //Iterates through the notes in the playlist
 int count2 = 0; //The counter that iterates through the names, looking for a match with the requested note
 int MAX_COUNT = (sizeof(melody) - 1) / 2; //How many notes are in the melody
 int statePin = LOW;
+unsigned long time = millis();
 bool alarmSounding = false;
 void speaker();
 
@@ -50,9 +51,11 @@ void loop() {
   if (digitalRead (sensorPin) == LOW) { //Used for testing purposes
     speaker();
   }
-  delay(100);
-  statePin = !statePin;
-  digitalWrite(ledPin, statePin);
+  else if (millis() - time >= 100) {
+    statePin = !statePin;
+    digitalWrite(ledPin, statePin);
+    time = millis();
+  }
 }
 
 void speaker() {
