@@ -26,7 +26,7 @@
 
 int ledPin = 13;
 int speakerOut = 9;
-int sensorPin = 1;
+int sensorPin = 2;
 byte names[] = {'c', 'd', 'e', 'f', 'g', 'a', 'b', 'C'};
 int tones[] = {1915, 1700, 1519, 1432, 1275, 1136, 1014, 956};
 byte melody[] = "3b3d3b3d"; //"3b3d3b3d3b3d3b3d";
