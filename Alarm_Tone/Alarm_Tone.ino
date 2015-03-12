@@ -49,11 +49,12 @@ int blinkRate = sensorBlinkRate;
 const int speakerOut = 9;
 const byte names[] = {'c', 'd', 'e', 'f', 'g', 'a', 'b', 'C'};
 const int tones[] = {1915, 1700, 1519, 1432, 1275, 1136, 1014, 956};
-const byte melody[] = "3b3d3b3d"; //"3b3d3b3d3b3d3b3d";
+const byte alarmTone[] = "3b3d3b3d"; //Takes speaker 1211ms to execute this tone
+const byte heartDeath[] = "2a1p2a3p";
 // count length: 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0
 //                                10                  20                  30
 bool alarmSounding = false;
-void speaker();
+void speaker(const byte melody[], unsigned int arraySize);
 
 //Bluetooth/Serial global variables
 const int receivePin = 10;
@@ -61,6 +62,11 @@ const int transmitPin = 11;
 const int btBaud = 9600;
 const int serialBaud = 9600;
 SoftwareSerial bluetooth(receivePin, transmitPin);
+
+//Water readings global variables
+const unsigned int timeTillOff = 100;
+const int delayTillAlarm = 100;
+void waterReadings();
 
 void setup() {
 
@@ -83,6 +89,9 @@ void setup() {
     opMode = alarm;
     blinkRate = alarmBlinkRate;
   }
+  else {
+    EEPROM.write(eepromModeAddress, opMode);
+  }
 
   //Setup Bluetooth/serial
   //Even though they might not be used (based on mode), activate them anyways so that the
@@ -93,14 +102,18 @@ void setup() {
 
 void loop() {
   //Sensor has been triggered or serial has been triggered
-  //Communications dictionary: '1' = alarm, '5' = reconfiguration
+  //Communications dictionary: '1' = alarm, '2' = heartbeat, '5' = reconfiguration
   //Reconfiguration protocol: "5 *mode*" ('5' signals that the next command is a reconfiguration, then a space, then the mode (0=sensor, 1=alarm, 2=query))
+  //Todo: in laptop relay, program it to only forward the communications dictionary commands, need a way to signal groups of communications
   //Todo: include fluctuation tolerance (e.g. 10 activations required before alarm)
   //Todo: heartbeat communications
   //Todo: communications on the serial interfaces may have varying length. Account for it
-  if (digitalRead (sensorPin) == LOW && opMode == sensor) {
-    bluetooth.write('1');
+  //DONE Todo: slow down bluetooth send rate. It's too fast and will leave an alarm on forever.
+  
+  if (opMode == sensor) {
+    waterReadings();
   }
+  
   if (Serial.available()) { //DO NOT allow mode reconfiguration via bluetooth. Security hazard.
 
     if (opMode == alarm) { //What if the Serial command was triggered to reconfigure? (CHECK WITH EUGEN THAT POWER AND USB COMBINED WON'T FRY THE BOARD!)
@@ -110,7 +123,7 @@ void loop() {
         reconfiguration(); //Start reconfiguration code
       }
       else if (input == '1') { //alarm has been rung
-        speaker();
+        speaker(alarmTone, sizeof(alarmTone));
       }
 
     }
@@ -127,11 +140,57 @@ void loop() {
       blinkRate = 0;
     }
   }
+  
   //oscillate light
   if (millis() - time >= blinkRate) {
     statePin = !statePin;
     digitalWrite(ledPin, statePin);
     time = millis();
+  }
+}
+
+void waterReadings() {
+  static bool noticed = false; //has it been noticed that a high reading was made recently?
+  static unsigned long timeNoticed = 0; //time the initial high reading was noticed
+  static unsigned int timeSinceLastHigh = 0; //time since the last high reading
+  static bool activated = false; //has the high readings been around long enough that it warranted an alarm
+  static unsigned long lastSignal = 0; //time the last warning signal was sent
+  
+  // if a water reading is made
+  if (digitalRead (sensorPin) == LOW) {
+    timeSinceLastHigh = millis(); //a high water reading was made, reset the counter
+    
+    //if there has been one seen previously
+    if (noticed) {
+      
+      //and it's been around for a while without getting turned off, activate
+      if (millis() - timeNoticed >= delayTillAlarm && activated == false) {
+        bluetooth.write('1');
+        activated = true;
+        lastSignal = millis();
+      }
+      
+      //if the alarm has already been activated, wait for the first alarm to play so you don't flood the alarm beacon
+      if (activated && millis() - lastSignal >= 1200) {
+        bluetooth.write('1');
+        lastSignal = millis();
+      }
+      
+    }
+    else { //this is the first time it's been seen, make note of it
+      noticed = true;
+      timeNoticed = millis();
+    }
+    
+  }
+  else { //there is no more high water readings
+    
+    //if the high water readings have been away for a while, kill the alarm
+    if (noticed && millis() - timeSinceLastHigh > timeTillOff) {
+      noticed = false;
+      activated = false;
+    }
+    
   }
 }
 
@@ -188,10 +247,10 @@ bool reconfiguration() {
   return retVal;
 }
 
-void speaker() {
+void speaker(const byte melody[], unsigned int arraySize) {
   alarmSounding = true;
   analogWrite(speakerOut, 0); //Ensure speaker starts off
-  for (int count = 0; count < (sizeof(melody) - 1) / 2; count++) { //Iterates through the notes requested
+  for (int count = 0; count < (arraySize - 1) / 2; count++) { //Iterates through the notes requested
     statePin = !statePin;
     digitalWrite(ledPin, statePin);
     for (int count2 = 0; count2 < 8; count2++) { //Iterate through tones
