@@ -25,10 +25,12 @@
  */
 
 #include <SoftwareSerial.h>
+#include <EEPROM.h>
 
 //General-use global variables
 enum mode {sensor, alarm};
 unsigned long time = millis();
+const unsigned int eepromModeAddress = 0;
 mode opMode = sensor;
 bool reconfiguration();
 
@@ -70,6 +72,17 @@ void setup() {
   digitalWrite(sensorPin, HIGH); //Sets the pullup resistor
 
   //Speaker is already set up by default as output
+  
+  //Read in mode from EEPROM
+  int storedMode = EEPROM.read(eepromModeAddress);
+  if (storedMode == 0) {
+    opMode = sensor;
+    blinkRate = sensorBlinkRate;
+  }
+  else if (storedMode == 1) {
+    opMode = alarm;
+    blinkRate = alarmBlinkRate;
+  }
 
   //Setup Bluetooth/serial
   //Even though they might not be used (based on mode), activate them anyways so that the
@@ -138,14 +151,16 @@ bool reconfiguration() {
     else if (input == '0' && counter == 1) {
       opMode = sensor;
       blinkRate = sensorBlinkRate;
+      EEPROM.write(eepromModeAddress, 0);
       retVal = true;
-      Serial.print("Now a sensor. Reconfiguration successful");
+      Serial.println("Now a sensor. Reconfiguration successful.");
     }
     else if (input == '1' && counter == 1) {
       opMode = alarm;
       blinkRate = alarmBlinkRate;
+      EEPROM.write(eepromModeAddress, 1);
       retVal = true;
-      Serial.print("Now an alarm. Reconfiguration successful.");
+      Serial.println("Now an alarm. Reconfiguration successful.");
     }
     else if (input == '2' && counter == 1) {
       
