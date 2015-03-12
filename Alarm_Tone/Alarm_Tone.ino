@@ -24,12 +24,23 @@
  * (cleft) 2005 D. Cuartielles for K3
  */
 
+#include <SoftwareSerial.h>
+
+//General-use global variables
+enum mode {undefined, sensor, alarm};
+unsigned long time = millis();
+mode opMode = undefined;
+
 //Sensor global variables
 const int sensorPin = 2;
 
 //LED global variables
 const int ledPin = 13;
 int statePin = LOW;
+const int undefinedBlinkRate = 50;
+const int sensorBlinkRate = 1000;
+const int alarmBlinkRate = 100;
+int blinkRate = undefinedBlinkRate;
 
 //Speaker global variables
 const int speakerOut = 9;
@@ -41,21 +52,50 @@ const byte melody[] = "3b3d3b3d"; //"3b3d3b3d3b3d3b3d";
 bool alarmSounding = false;
 void speaker();
 
-//General-use global variables
-unsigned long time = millis();
+//Bluetooth/Serial global variables
+const int receivePin = 10;
+const int transmitPin = 11;
+const int btBaud = 9600;
+const int serialBaud = 9600;
+SoftwareSerial bluetooth(receivePin, transmitPin);
 
 void setup() {
+
+  //Setup LED
   pinMode(ledPin, OUTPUT);
+
+  //Setup Sensor
   pinMode(sensorPin, INPUT);
-  digitalWrite(sensorPin, HIGH); //Sets the pullup resistor //Used for testing purposes
+  digitalWrite(sensorPin, HIGH); //Sets the pullup resistor
+
   //Speaker is already set up by default as output
+
+  //Setup Bluetooth/serial
+  //Even though they might not be used (based on mode), activate them anyways so that the
+  //mode can be changed on-the-fly at runtime
+  bluetooth.begin(btBaud);
+  Serial.begin(serialBaud);
 }
 
 void loop() {
-  if (digitalRead (sensorPin) == LOW) { //Used for testing purposes
-    speaker();
+  //Sensor has been triggered or serial has been triggered
+  //Todo: include fluctuation tolerance (e.g. 10 activations required before alarm)
+  //Todo: heartbeat communications
+  //Todo: communications on the serial interfaces may have varying length. Account for it
+  if (digitalRead (sensorPin) == LOW || Serial.available()) {
+    if (opMode == alarm) {
+      Serial.read(); //clear out the serial warning
+      speaker();
+    }
+    else if (opMode == sensor) {
+      bluetooth.write('1');
+    }
+    else {
+      //MODE IS NOT DEFINED!
+    }
   }
-  else if (millis() - time >= 100) {
+  //oscillate light
+  else if (millis() - time >= blinkRate) {
     statePin = !statePin;
     digitalWrite(ledPin, statePin);
     time = millis();
