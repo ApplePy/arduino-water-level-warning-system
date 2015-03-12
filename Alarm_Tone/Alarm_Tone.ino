@@ -115,16 +115,23 @@ void loop() {
   //Communications dictionary: '1' = alarm, '2' = heartbeat, '5' = reconfiguration
   //Reconfiguration protocol: "5 *mode*" ('5' signals that the next command is a reconfiguration, then a space, then the mode (0=sensor, 1=alarm, 2=query))
   //Todo: in laptop relay, program it to only forward the communications dictionary commands, need a way to signal groups of communications
-  //Todo: include fluctuation tolerance (e.g. 10 activations required before alarm)
-  //Todo: heartbeat communications
+  //DONE Todo: include fluctuation tolerance (e.g. 10 activations required before alarm)
+  //DONE Todo: heartbeat communications
   //Todo: communications on the serial interfaces may have varying length. Account for it
   //DONE Todo: slow down bluetooth send rate. It's too fast and will leave an alarm on forever.
+  //Todo: sort out serial communications into "protocols" and message grouping, so that serial data can be processed properly by the computer (e.g. start/stop characters, escape characters, etc.)
+  //rough thought: just surround each message with '|' to separate messages, and keep a bool indicating if the program is still inside a message or not. Allows to compare commands against a "mask" to avoid commands
+  //interferring with each other, blocking malformed commands, and such.
+  //Todo: signal binary data
 
   if (opMode == sensor) {
     waterReadings();
   }
   if (opMode == alarm) {
-    heartbeat();
+    int heartResult = heartbeat();
+    if (heartResult == 4 || heartResult / 10 == 4) {
+      speaker(heartDeath, sizeof(heartDeath));
+    }
   }
 
   if (Serial.available()) { //DO NOT allow mode reconfiguration via bluetooth. Security hazard.
@@ -135,8 +142,12 @@ void loop() {
       if (input == '5') {
         reconfiguration(); //Start reconfiguration code
       }
+
       else if (input == '2') { //a heartbeat came in, respond
-        heartbeat(true);
+        int heartResult = heartbeat(true);
+        if (heartResult == 4 || heartResult / 10 == 4) {
+          speaker(heartDeath, sizeof(heartDeath));
+        }
       }
       else if (input == '1') { //alarm has been rung
         speaker(alarmTone, sizeof(alarmTone));
@@ -238,7 +249,7 @@ int heartbeat(bool sent) {
   //if a heartbeat came in
   else if (sent) {
     delay(10); //this is needed
-  
+
     //Assemble the returned value
     char num = Serial.read();
     int checkReturned = atoi((const char *) &num) * 10;
