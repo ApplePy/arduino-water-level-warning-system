@@ -31,6 +31,7 @@
 enum mode {sensor, alarm};
 unsigned long time = millis();
 const unsigned int eepromModeAddress = 0;
+const bool eepromWriteProtect = true;
 mode opMode = sensor;
 bool reconfiguration();
 
@@ -68,6 +69,10 @@ const unsigned int timeTillOff = 100;
 const int delayTillAlarm = 100;
 void waterReadings();
 
+//Heartbeat global variables
+const unsigned int heartbeatTimeout = 5000;
+int heartbeat(bool sent = false);
+
 void setup() {
 
   //Setup LED
@@ -78,7 +83,7 @@ void setup() {
   digitalWrite(sensorPin, HIGH); //Sets the pullup resistor
 
   //Speaker is already set up by default as output
-  
+
   //Read in mode from EEPROM
   int storedMode = EEPROM.read(eepromModeAddress);
   if (storedMode == 0) {
@@ -90,7 +95,9 @@ void setup() {
     blinkRate = alarmBlinkRate;
   }
   else {
-    EEPROM.write(eepromModeAddress, opMode);
+    if (!eepromWriteProtect) {
+      EEPROM.write(eepromModeAddress, opMode);
+    }
   }
 
   //Setup Bluetooth/serial
@@ -98,6 +105,9 @@ void setup() {
   //mode can be changed on-the-fly at runtime
   bluetooth.begin(btBaud);
   Serial.begin(serialBaud);
+
+  //Seed randomness
+  randomSeed(analogRead(0));
 }
 
 void loop() {
@@ -109,11 +119,14 @@ void loop() {
   //Todo: heartbeat communications
   //Todo: communications on the serial interfaces may have varying length. Account for it
   //DONE Todo: slow down bluetooth send rate. It's too fast and will leave an alarm on forever.
-  
+
   if (opMode == sensor) {
     waterReadings();
   }
-  
+  if (opMode == alarm) {
+    heartbeat();
+  }
+
   if (Serial.available()) { //DO NOT allow mode reconfiguration via bluetooth. Security hazard.
 
     if (opMode == alarm) { //What if the Serial command was triggered to reconfigure? (CHECK WITH EUGEN THAT POWER AND USB COMBINED WON'T FRY THE BOARD!)
@@ -121,6 +134,9 @@ void loop() {
 
       if (input == '5') {
         reconfiguration(); //Start reconfiguration code
+      }
+      else if (input == '2') { //a heartbeat came in, respond
+        heartbeat(true);
       }
       else if (input == '1') { //alarm has been rung
         speaker(alarmTone, sizeof(alarmTone));
@@ -133,6 +149,9 @@ void loop() {
       if (input == '5') { //order of these conditions is important so compiler checks available first!
         reconfiguration(); //Start reconfiguration code
       }
+      else if (input == '2') { //a heartbeat came in, respond
+        heartbeat(true);
+      }
 
     }
     else {
@@ -140,7 +159,7 @@ void loop() {
       blinkRate = 0;
     }
   }
-  
+
   //oscillate light
   if (millis() - time >= blinkRate) {
     statePin = !statePin;
@@ -155,74 +174,151 @@ void waterReadings() {
   static unsigned int timeSinceLastHigh = 0; //time since the last high reading
   static bool activated = false; //has the high readings been around long enough that it warranted an alarm
   static unsigned long lastSignal = 0; //time the last warning signal was sent
-  
+
   // if a water reading is made
   if (digitalRead (sensorPin) == LOW) {
     timeSinceLastHigh = millis(); //a high water reading was made, reset the counter
-    
+
     //if there has been one seen previously
     if (noticed) {
-      
+
       //and it's been around for a while without getting turned off, activate
       if (millis() - timeNoticed >= delayTillAlarm && activated == false) {
         bluetooth.write('1');
         activated = true;
         lastSignal = millis();
       }
-      
+
       //if the alarm has already been activated, wait for the first alarm to play so you don't flood the alarm beacon
       if (activated && millis() - lastSignal >= 1200) {
         bluetooth.write('1');
         lastSignal = millis();
       }
-      
+
     }
     else { //this is the first time it's been seen, make note of it
       noticed = true;
       timeNoticed = millis();
     }
-    
+
   }
   else { //there is no more high water readings
-    
+
     //if the high water readings have been away for a while, kill the alarm
     if (noticed && millis() - timeSinceLastHigh > timeTillOff) {
       noticed = false;
       activated = false;
     }
-    
+
   }
+}
+
+//Return codes: 0=response ok, 1=waiting for a response, 2=heartbeat sent, 3=incorrect response, 4=lost communications
+//42=lost communications, sent a new one, 41=lost comms, waiting for a response to new heartbeat, 43=lost communications, incorrect response
+//The sensor only returns 2
+int heartbeat(bool sent) {
+  static unsigned long timeSent = millis();
+  static unsigned int checkValue = 0;
+  static bool signalSent = false;
+  static bool lostComms = false;
+
+  //if a heartbeat hasn't been sent, or one has had a successful validation and enough time has passed to send a new one
+  if (!signalSent && opMode == alarm && millis() - timeSent >= heartbeatTimeout) {
+    checkValue = random(0, 53);
+    timeSent = millis();
+    Serial.print(200 + checkValue);
+    signalSent = true;
+    if (lostComms) {
+      return 42;
+    }
+    else {
+      return 2;
+    }
+  }
+  //if a heartbeat came in
+  else if (sent) {
+    delay(10); //this is needed
+  
+    //Assemble the returned value
+    char num = Serial.read();
+    int checkReturned = atoi((const char *) &num) * 10;
+    num = Serial.read();
+    checkReturned += atoi((const char *) &num);
+
+    if (opMode == alarm) {
+
+      //validate the returned value, return result
+      if (checkValue + 1 == checkReturned) {
+        signalSent = false;
+        lostComms = false;
+        Serial.println("Validated successfully");
+        return 0;
+      }
+      else {
+        //signalSent = false; //don't kill the signalSent, the real one may be on the way
+        Serial.println ("No validation");
+
+        if (lostComms) {
+          return 43;
+        }
+        else {
+          return 3;
+        }
+
+      }
+
+    }
+    else if (opMode == sensor) {
+      //increment the return value by one, and send back
+      bluetooth.print(200 + checkReturned + 1);
+      return 2;
+    }
+
+  }
+
+  //If the heartbeat hasn't arrived yet
+  if (millis() - timeSent >= heartbeatTimeout && opMode == alarm) {
+    signalSent = false;
+    lostComms = true;
+    Serial.println ("Lost communications");
+    return 4;
+  }
+
 }
 
 bool reconfiguration() {
   Serial.println ("Starting reconfiguration...");
   bool retVal = false;
   unsigned int counter = 0;
-  
+
   delay(10); //Necessary to make this work
-  
+
   while (Serial.available() && counter < 2) {
     char input = Serial.read();
-    
+
     if (input == ' ' && counter == 0) {
       //NULL, keep going
     }
     else if (input == '0' && counter == 1) {
       opMode = sensor;
       blinkRate = sensorBlinkRate;
-      EEPROM.write(eepromModeAddress, 0);
+      if (!eepromWriteProtect) {
+        EEPROM.write(eepromModeAddress, 0);
+      }
       retVal = true;
       Serial.println("Now a sensor. Reconfiguration successful.");
     }
     else if (input == '1' && counter == 1) {
       opMode = alarm;
       blinkRate = alarmBlinkRate;
-      EEPROM.write(eepromModeAddress, 1);
+      if (!eepromWriteProtect) {
+        EEPROM.write(eepromModeAddress, 1);
+      }
       retVal = true;
       Serial.println("Now an alarm. Reconfiguration successful.");
     }
     else if (input == '2' && counter == 1) {
-      
+
       if (opMode == sensor) {
         Serial.println("I'm a sensor.");
         retVal = true;
@@ -231,7 +327,7 @@ bool reconfiguration() {
         Serial.println ("I'm an alarm.");
         retVal = true;
       }
-      
+
     }
     else {
       retVal = false;
@@ -276,4 +372,4 @@ void speaker(const byte melody[], unsigned int arraySize) {
   alarmSounding = false;
 }
 
-//Base code from http://www.arduino.cc/en/Tutorial/PlayMelody
+//Base speaker code from http://www.arduino.cc/en/Tutorial/PlayMelody
