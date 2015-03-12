@@ -27,9 +27,10 @@
 #include <SoftwareSerial.h>
 
 //General-use global variables
-enum mode {undefined, sensor, alarm};
+enum mode {sensor, alarm};
 unsigned long time = millis();
-mode opMode = undefined;
+mode opMode = sensor;
+bool reconfiguration();
 
 //Sensor global variables
 const int sensorPin = 2;
@@ -40,7 +41,7 @@ int statePin = LOW;
 const int undefinedBlinkRate = 50;
 const int sensorBlinkRate = 1000;
 const int alarmBlinkRate = 100;
-int blinkRate = undefinedBlinkRate;
+int blinkRate = sensorBlinkRate;
 
 //Speaker global variables
 const int speakerOut = 9;
@@ -79,27 +80,97 @@ void setup() {
 
 void loop() {
   //Sensor has been triggered or serial has been triggered
+  //Communications dictionary: '1' = alarm, '5' = reconfiguration
+  //Reconfiguration protocol: "5 *mode*" ('5' signals that the next command is a reconfiguration, then a space, then the mode (0=sensor, 1=alarm, 2=query))
   //Todo: include fluctuation tolerance (e.g. 10 activations required before alarm)
   //Todo: heartbeat communications
   //Todo: communications on the serial interfaces may have varying length. Account for it
-  if (digitalRead (sensorPin) == LOW || Serial.available()) {
-    if (opMode == alarm) {
-      Serial.read(); //clear out the serial warning
-      speaker();
+  if (digitalRead (sensorPin) == LOW && opMode == sensor) {
+    bluetooth.write('1');
+  }
+  if (Serial.available()) { //DO NOT allow mode reconfiguration via bluetooth. Security hazard.
+
+    if (opMode == alarm) { //What if the Serial command was triggered to reconfigure? (CHECK WITH EUGEN THAT POWER AND USB COMBINED WON'T FRY THE BOARD!)
+      char input = Serial.read();
+
+      if (input == '5') {
+        reconfiguration(); //Start reconfiguration code
+      }
+      else if (input == '1') { //alarm has been rung
+        speaker();
+      }
+
     }
     else if (opMode == sensor) {
-      bluetooth.write('1');
+      char input = Serial.read();
+
+      if (input == '5') { //order of these conditions is important so compiler checks available first!
+        reconfiguration(); //Start reconfiguration code
+      }
+
     }
     else {
-      //MODE IS NOT DEFINED!
+      //OPMODE BROKE! WARN!
+      blinkRate = 0;
     }
   }
   //oscillate light
-  else if (millis() - time >= blinkRate) {
+  if (millis() - time >= blinkRate) {
     statePin = !statePin;
     digitalWrite(ledPin, statePin);
     time = millis();
   }
+}
+
+bool reconfiguration() {
+  Serial.println ("Starting reconfiguration...");
+  bool retVal = false;
+  unsigned int counter = 0;
+  
+  delay(10); //Necessary to make this work
+  
+  while (Serial.available() && counter < 2) {
+    char input = Serial.read();
+    
+    if (input == ' ' && counter == 0) {
+      //NULL, keep going
+    }
+    else if (input == '0' && counter == 1) {
+      opMode = sensor;
+      blinkRate = sensorBlinkRate;
+      retVal = true;
+      Serial.print("Now a sensor. Reconfiguration successful");
+    }
+    else if (input == '1' && counter == 1) {
+      opMode = alarm;
+      blinkRate = alarmBlinkRate;
+      retVal = true;
+      Serial.print("Now an alarm. Reconfiguration successful.");
+    }
+    else if (input == '2' && counter == 1) {
+      
+      if (opMode == sensor) {
+        Serial.println("I'm a sensor.");
+        retVal = true;
+      }
+      else if (opMode == alarm) {
+        Serial.println ("I'm an alarm.");
+        retVal = true;
+      }
+      
+    }
+    else {
+      retVal = false;
+      break;
+    }
+
+    counter++;
+  }
+
+  if (retVal == false) {
+    Serial.println("Reconfiguration failure.");
+  }
+  return retVal;
 }
 
 void speaker() {
