@@ -24,21 +24,25 @@
  * (cleft) 2005 D. Cuartielles for K3
  */
 
-int ledPin = 13;
-int speakerOut = 9;
-int sensorPin = 2;
-byte names[] = {'c', 'd', 'e', 'f', 'g', 'a', 'b', 'C'};
-int tones[] = {1915, 1700, 1519, 1432, 1275, 1136, 1014, 956};
-byte melody[] = "3b3d3b3d"; //"3b3d3b3d3b3d3b3d";
+//Sensor global variables
+const int sensorPin = 2;
+
+//LED global variables
+const int ledPin = 13;
+int statePin = LOW;
+
+//Speaker global variables
+const int speakerOut = 9;
+const byte names[] = {'c', 'd', 'e', 'f', 'g', 'a', 'b', 'C'};
+const int tones[] = {1915, 1700, 1519, 1432, 1275, 1136, 1014, 956};
+const byte melody[] = "3b3d3b3d"; //"3b3d3b3d3b3d3b3d";
 // count length: 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0
 //                                10                  20                  30
-int count = 0; //Iterates through the notes in the playlist
-int count2 = 0; //The counter that iterates through the names, looking for a match with the requested note
-int MAX_COUNT = (sizeof(melody) - 1) / 2; //How many notes are in the melody
-int statePin = LOW;
-unsigned long time = millis();
 bool alarmSounding = false;
 void speaker();
+
+//General-use global variables
+unsigned long time = millis();
 
 void setup() {
   pinMode(ledPin, OUTPUT);
@@ -61,10 +65,10 @@ void loop() {
 void speaker() {
   alarmSounding = true;
   analogWrite(speakerOut, 0); //Ensure speaker starts off
-  for (count = 0; count < MAX_COUNT; count++) { //Iterates through the notes requested
+  for (int count = 0; count < (sizeof(melody) - 1) / 2; count++) { //Iterates through the notes requested
     statePin = !statePin;
     digitalWrite(ledPin, statePin);
-    for (count2 = 0; count2 < 8; count2++) { //Iterate through tones
+    for (int count2 = 0; count2 < 8; count2++) { //Iterate through tones
       if (names[count2] == melody[count * 2 + 1]) { //if you find a tone that matches the tone requested
         unsigned long startTime = millis();
         while (millis() - startTime <= (melody[count * 2] - 48) * 100) { //rudimentary way of spacing out the length of a tone, and keeps tones at the same length
