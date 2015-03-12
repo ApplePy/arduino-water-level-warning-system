@@ -28,6 +28,7 @@
 #include <EEPROM.h>
 
 //General-use global variables
+enum iface {USB, BT};
 enum mode {sensor, alarm};
 unsigned long time = millis();
 const unsigned int eepromModeAddress = 0;
@@ -135,39 +136,46 @@ void loop() {
   }
 
   if (Serial.available()) { //DO NOT allow mode reconfiguration via bluetooth. Security hazard.
+    char cleanout = ' ';
 
-    if (opMode == alarm) { //What if the Serial command was triggered to reconfigure? (CHECK WITH EUGEN THAT POWER AND USB COMBINED WON'T FRY THE BOARD!)
-      char input = Serial.read();
+    //Cleans out any garbage left in the Serial port
+    while (cleanout != '|' && Serial.available()) {
+      cleanout = Serial.read();
+    }
 
-      if (input == '5') {
-        reconfiguration(); //Start reconfiguration code
-      }
+    //if the beginning of a command is found (takes care of "|\0" and "||" possible cases)
+    if (cleanout == '|' && Serial.available() && Serial.peek() != '|') {
+      if (opMode == alarm) { //What if the Serial command was triggered to reconfigure? (CHECK WITH EUGEN THAT POWER AND USB COMBINED WON'T FRY THE BOARD!)
+        char input = Serial.read();
 
-      else if (input == '2') { //a heartbeat came in, respond
-        int heartResult = heartbeat(true);
-        if (heartResult == 4 || heartResult / 10 == 4) {
-          speaker(heartDeath, sizeof(heartDeath));
+        if (input == '2') { //a heartbeat came in, respond
+          int heartResult = heartbeat(true);
+          if (heartResult == 4 || heartResult / 10 == 4) {
+            speaker(heartDeath, sizeof(heartDeath));
+          }
+        }
+        else if (input == '5') {
+          reconfiguration(); //Start reconfiguration code
+        }
+        else if (input == '1') { //alarm has been rung
+          speaker(alarmTone, sizeof(alarmTone));
         }
       }
-      else if (input == '1') { //alarm has been rung
-        speaker(alarmTone, sizeof(alarmTone));
-      }
+      else if (opMode == sensor) {
+        char input = Serial.read();
 
-    }
-    else if (opMode == sensor) {
-      char input = Serial.read();
+        if (input == '5') { //order of these conditions is important so compiler checks available first!
+          reconfiguration(); //Start reconfiguration code
+        }
+        else if (input == '2') { //a heartbeat came in, respond
+          heartbeat(true);
+        }
 
-      if (input == '5') { //order of these conditions is important so compiler checks available first!
-        reconfiguration(); //Start reconfiguration code
       }
-      else if (input == '2') { //a heartbeat came in, respond
-        heartbeat(true);
+      else {
+        //OPMODE BROKE! WARN!
+        blinkRate = 0;
       }
-
-    }
-    else {
-      //OPMODE BROKE! WARN!
-      blinkRate = 0;
     }
   }
 
@@ -195,14 +203,14 @@ void waterReadings() {
 
       //and it's been around for a while without getting turned off, activate
       if (millis() - timeNoticed >= delayTillAlarm && activated == false) {
-        bluetooth.write('1');
+        bluetooth.print("|1|");
         activated = true;
         lastSignal = millis();
       }
 
       //if the alarm has already been activated, wait for the first alarm to play so you don't flood the alarm beacon
       if (activated && millis() - lastSignal >= 1200) {
-        bluetooth.write('1');
+        bluetooth.print("|1|");
         lastSignal = millis();
       }
 
@@ -226,7 +234,7 @@ void waterReadings() {
 
 //Return codes: 0=response ok, 1=waiting for a response, 2=heartbeat sent, 3=incorrect response, 4=lost communications
 //42=lost communications, sent a new one, 41=lost comms, waiting for a response to new heartbeat, 43=lost communications, incorrect response
-//The sensor only returns 2
+//The sensor only returns 2 and 3
 int heartbeat(bool sent) {
   static unsigned long timeSent = millis();
   static unsigned int checkValue = 0;
@@ -237,7 +245,7 @@ int heartbeat(bool sent) {
   if (!signalSent && opMode == alarm && millis() - timeSent >= heartbeatTimeout) {
     checkValue = random(0, 53);
     timeSent = millis();
-    Serial.print(200 + checkValue);
+    Serial.print("|" + String(200 + checkValue) + "|");
     signalSent = true;
     if (lostComms) {
       return 42;
@@ -255,6 +263,16 @@ int heartbeat(bool sent) {
     int checkReturned = atoi((const char *) &num) * 10;
     num = Serial.read();
     checkReturned += atoi((const char *) &num);
+    
+    if (Serial.read() != '|') {
+      Serial.println ("!Checksum malformed.");
+      if (lostComms) {
+        return 43;
+      }
+      else {
+        return 3;
+      }
+    }
 
     if (opMode == alarm) {
 
@@ -262,12 +280,12 @@ int heartbeat(bool sent) {
       if (checkValue + 1 == checkReturned) {
         signalSent = false;
         lostComms = false;
-        Serial.println("Validated successfully");
+        Serial.println("!Validated successfully.");
         return 0;
       }
       else {
         //signalSent = false; //don't kill the signalSent, the real one may be on the way
-        Serial.println ("No validation");
+        Serial.println ("!No validation.");
 
         if (lostComms) {
           return 43;
@@ -281,7 +299,7 @@ int heartbeat(bool sent) {
     }
     else if (opMode == sensor) {
       //increment the return value by one, and send back
-      bluetooth.print(200 + checkReturned + 1);
+      bluetooth.print("|" + String(200 + checkReturned + 1) + "|");
       return 2;
     }
 
@@ -291,14 +309,14 @@ int heartbeat(bool sent) {
   if (millis() - timeSent >= heartbeatTimeout && opMode == alarm) {
     signalSent = false;
     lostComms = true;
-    Serial.println ("Lost communications");
+    Serial.println ("!Lost communications");
     return 4;
   }
 
 }
 
 bool reconfiguration() {
-  Serial.println ("Starting reconfiguration...");
+  Serial.println ("!Starting reconfiguration...");
   bool retVal = false;
   unsigned int counter = 0;
 
@@ -317,7 +335,7 @@ bool reconfiguration() {
         EEPROM.write(eepromModeAddress, 0);
       }
       retVal = true;
-      Serial.println("Now a sensor. Reconfiguration successful.");
+      Serial.println("!Now a sensor. Reconfiguration successful.");
     }
     else if (input == '1' && counter == 1) {
       opMode = alarm;
@@ -326,16 +344,16 @@ bool reconfiguration() {
         EEPROM.write(eepromModeAddress, 1);
       }
       retVal = true;
-      Serial.println("Now an alarm. Reconfiguration successful.");
+      Serial.println("!Now an alarm. Reconfiguration successful.");
     }
     else if (input == '2' && counter == 1) {
 
       if (opMode == sensor) {
-        Serial.println("I'm a sensor.");
+        Serial.println("!I'm a sensor.");
         retVal = true;
       }
       else if (opMode == alarm) {
-        Serial.println ("I'm an alarm.");
+        Serial.println ("!I'm an alarm.");
         retVal = true;
       }
 
@@ -349,8 +367,15 @@ bool reconfiguration() {
   }
 
   if (retVal == false) {
-    Serial.println("Reconfiguration failure.");
+    Serial.println("!Reconfiguration failure.");
   }
+  
+  //Strip out any remaining stuff in the message
+  char clean = ' ';
+  while (clean != '|' && Serial.available()) {
+    clean = Serial.read();
+  }
+  
   return retVal;
 }
 
