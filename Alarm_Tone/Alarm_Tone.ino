@@ -131,7 +131,7 @@ void loop() {
     }
   }
 
-  if (Serial.available()) { //DO NOT allow mode reconfiguration via bluetooth. Security hazard.
+  if (Serial.available()) {
     char cleanout = ' ';
     char input = ' ';
 
@@ -161,6 +161,30 @@ void loop() {
           reconfiguration(); //Start reconfiguration code
         }
         else if (input == '2') { //a heartbeat came in, respond
+          heartbeat(true);
+        }
+
+      }
+      else {
+        //OPMODE BROKE! WARN!
+        blinkRate = 0;
+      }
+    }
+  }
+
+  if (bluetooth.available()) {
+    delay(10); //this is needed
+
+    char cleanout = ' ';
+    char input = ' ';
+    
+    cleanout = bluetooth.read();
+    input = bluetooth.read();
+    
+    //if the beginning of a command is found (takes care of "|\0" and "||" possible cases)
+    if (cleanout == '|' && input != '|') {
+      if (opMode == sensor) {
+        if (input == '2') { //a heartbeat came in, respond
           heartbeat(true);
         }
 
@@ -251,23 +275,22 @@ int heartbeat(bool sent) {
   else if (sent) {
     delay(10); //this is needed
 
-    //Assemble the returned value
-    char num = Serial.read();
-    int checkReturned = atoi((const char *) &num) * 10;
-    num = Serial.read();
-    checkReturned += atoi((const char *) &num);
-
-    if (Serial.read() != '|') {
-      Serial.println ("!Checksum malformed.");
-      if (lostComms) {
-        return 43;
-      }
-      else {
-        return 3;
-      }
-    }
-
     if (opMode == alarm) {
+      //Assemble the returned value
+      char num = Serial.read();
+      int checkReturned = atoi((const char *) &num) * 10;
+      num = Serial.read();
+      checkReturned += atoi((const char *) &num);
+
+      if (Serial.read() != '|') {
+        Serial.println ("!Checksum malformed.");
+        if (lostComms) {
+          return 43;
+        }
+        else {
+          return 3;
+        }
+      }
 
       //validate the returned value, return result
       if (checkValue + 1 == checkReturned) {
@@ -291,6 +314,12 @@ int heartbeat(bool sent) {
 
     }
     else if (opMode == sensor) {
+      //Assemble the returned value
+      char num = bluetooth.read();
+      int checkReturned = atoi((const char *) &num) * 10;
+      num = bluetooth.read();
+      checkReturned += atoi((const char *) &num);
+      
       //increment the return value by one, and send back
       bluetooth.print("|" + String(200 + checkReturned + 1) + "|");
       return 2;
