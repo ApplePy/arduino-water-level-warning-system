@@ -42,7 +42,6 @@ const int sensorPin = 2;
 //LED global variables
 const int ledPin = 13;
 int statePin = LOW;
-const int undefinedBlinkRate = 50;
 const int sensorBlinkRate = 1000;
 const int alarmBlinkRate = 100;
 int blinkRate = sensorBlinkRate;
@@ -55,7 +54,6 @@ const byte alarmTone[] = "3b3d3b3d"; //Takes speaker 1211ms to execute this tone
 const byte heartDeath[] = "2a1p2a3p";
 // count length: 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0
 //                                10                  20                  30
-bool alarmSounding = false;
 void speaker(const byte melody[], unsigned int arraySize);
 
 //Bluetooth/Serial global variables
@@ -115,15 +113,13 @@ void loop() {
   //Sensor has been triggered or serial has been triggered
   //Communications dictionary: '1' = alarm, '2' = heartbeat, '5' = reconfiguration
   //Reconfiguration protocol: "5 *mode*" ('5' signals that the next command is a reconfiguration, then a space, then the mode (0=sensor, 1=alarm, 2=query))
-  //Todo: in laptop relay, program it to only forward the communications dictionary commands, need a way to signal groups of communications
+  //Message packet structure: first character is ! (user text) or | (data). Packets are terminated by a \n (user text) or | (data)
+  //DONE Todo: in laptop relay, program it to only forward the communications dictionary commands
   //DONE Todo: include fluctuation tolerance (e.g. 10 activations required before alarm)
   //DONE Todo: heartbeat communications
-  //Todo: communications on the serial interfaces may have varying length. Account for it
+  //DONE Todo: communications on the serial interfaces may have varying length. Account for it
   //DONE Todo: slow down bluetooth send rate. It's too fast and will leave an alarm on forever.
-  //Todo: sort out serial communications into "protocols" and message grouping, so that serial data can be processed properly by the computer (e.g. start/stop characters, escape characters, etc.)
-  //rough thought: just surround each message with '|' to separate messages, and keep a bool indicating if the program is still inside a message or not. Allows to compare commands against a "mask" to avoid commands
-  //interferring with each other, blocking malformed commands, and such.
-  //Todo: signal binary data
+  //DONE Todo: set up message packet stucture
 
   if (opMode == sensor) {
     waterReadings();
@@ -137,16 +133,15 @@ void loop() {
 
   if (Serial.available()) { //DO NOT allow mode reconfiguration via bluetooth. Security hazard.
     char cleanout = ' ';
+    char input = ' ';
 
-    //Cleans out any garbage left in the Serial port
-    while (cleanout != '|' && Serial.available()) {
-      cleanout = Serial.read();
-    }
+    delay(10);
+    cleanout = Serial.read();
+    input = Serial.read();
 
     //if the beginning of a command is found (takes care of "|\0" and "||" possible cases)
-    if (cleanout == '|' && Serial.available() && Serial.peek() != '|') {
+    if (cleanout == '|' && input != '|') {
       if (opMode == alarm) { //What if the Serial command was triggered to reconfigure? (CHECK WITH EUGEN THAT POWER AND USB COMBINED WON'T FRY THE BOARD!)
-        char input = Serial.read();
 
         if (input == '2') { //a heartbeat came in, respond
           int heartResult = heartbeat(true);
@@ -162,8 +157,6 @@ void loop() {
         }
       }
       else if (opMode == sensor) {
-        char input = Serial.read();
-
         if (input == '5') { //order of these conditions is important so compiler checks available first!
           reconfiguration(); //Start reconfiguration code
         }
@@ -263,7 +256,7 @@ int heartbeat(bool sent) {
     int checkReturned = atoi((const char *) &num) * 10;
     num = Serial.read();
     checkReturned += atoi((const char *) &num);
-    
+
     if (Serial.read() != '|') {
       Serial.println ("!Checksum malformed.");
       if (lostComms) {
@@ -369,18 +362,17 @@ bool reconfiguration() {
   if (retVal == false) {
     Serial.println("!Reconfiguration failure.");
   }
-  
+
   //Strip out any remaining stuff in the message
   char clean = ' ';
   while (clean != '|' && Serial.available()) {
     clean = Serial.read();
   }
-  
+
   return retVal;
 }
 
 void speaker(const byte melody[], unsigned int arraySize) {
-  alarmSounding = true;
   analogWrite(speakerOut, 0); //Ensure speaker starts off
   for (int count = 0; count < (arraySize - 1) / 2; count++) { //Iterates through the notes requested
     statePin = !statePin;
@@ -405,7 +397,6 @@ void speaker(const byte melody[], unsigned int arraySize) {
       }
     }
   }
-  alarmSounding = false;
 }
 
 //Base speaker code from http://www.arduino.cc/en/Tutorial/PlayMelody
