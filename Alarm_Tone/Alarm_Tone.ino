@@ -259,7 +259,7 @@ int heartbeat(bool sent) {
   static bool lostComms = false;
 
   //if a heartbeat hasn't been sent, or one has had a successful validation and enough time has passed to send a new one
-  if (!signalSent && opMode == alarm && millis() - timeSent >= heartbeatTimeout) {
+  if (!signalSent && opMode == alarm && millis() - timeSent >= heartbeatTimeout - 500) { // -500 so that there isn't a time race between creating a heartbeat and setting off the alarm
     checkValue = random(0, 53);
     timeSent = millis();
     Serial.print("|" + String(200 + checkValue) + "|");
