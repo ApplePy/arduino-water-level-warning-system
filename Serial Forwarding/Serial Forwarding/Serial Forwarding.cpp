@@ -106,6 +106,11 @@ int _tmain(int argc, _TCHAR* argv[])
 
 	if (!SetCommState(comPortUSB, &dcbUSB)) {
 		errorOutput();
+		return 1;
+	}
+	if (!SetCommState(comPortBT, &dcbUSB)) {
+		errorOutput();
+		return 1;
 	}
 
 	//Set timeouts
@@ -296,7 +301,8 @@ DWORD WINAPI ThreadProc(LPVOID parameter) {
 			if (bytesRead == 0) {
 				counter--;
 			}
-		} while (counter < sizeof(internalBuffer) && internalBuffer[counter] != delim);
+
+		} while (counter < sizeof(internalBuffer) && (counter == 0 || internalBuffer[counter] != delim));
 
 		memcpy_s(buffer, BUFFER_SIZE, internalBuffer, BUFFER_SIZE); //copy contents of internal buffer back to global buffer
 
