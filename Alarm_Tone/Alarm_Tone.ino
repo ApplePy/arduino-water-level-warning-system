@@ -69,7 +69,7 @@ const int delayTillAlarm = 100;
 void waterReadings();
 
 //Heartbeat global variables
-const unsigned int heartbeatTimeout = 5000;
+const unsigned int heartbeatTimeout = 2000;
 int heartbeat(bool sent = false);
 
 void setup() {
